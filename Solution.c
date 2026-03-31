@@ -6,6 +6,16 @@
 #define EPS 1e-9
 #define INF 1e100
 #define PI 3.14159265358979323846
+#define DIR_ZERO_NORM_EPS 1e-12
+#define DIR_DUP_EPS 1e-10
+#define OUTPUT_ZERO_THRESHOLD 5e-7
+#define INITIAL_STEP_SIZE 1e-6
+#define COARSE_SEARCH_STEPS 24
+#define BINARY_SEARCH_ITERATIONS 45
+#define ANGULAR_REFINEMENT_INITIAL_DELTA (PI / 6.0)
+#define ANGULAR_REFINEMENT_ROUNDS 8
+#define SEARCH_LIMIT_MULTIPLIER 8.0
+#define SEARCH_LIMIT_BASE 10.0
 
 typedef struct {
     double x;
@@ -128,18 +138,21 @@ static int polygons_overlap_strict(double dx, double dy) {
 
 static void add_dir(double x, double y) {
     double len = sqrt(x * x + y * y);
-    if (len < 1e-12) return;
+    if (len < DIR_ZERO_NORM_EPS) return;
     x /= len;
     y /= len;
 
     for (int i = 0; i < base_dir_count; ++i) {
-        if (fabs(base_dirs[i].x - x) < 1e-10 && fabs(base_dirs[i].y - y) < 1e-10) return;
+        if (fabs(base_dirs[i].x - x) < DIR_DUP_EPS && fabs(base_dirs[i].y - y) < DIR_DUP_EPS) return;
     }
 
     if (base_dir_count == base_dir_cap) {
         int new_cap = base_dir_cap == 0 ? 64 : base_dir_cap * 2;
         Vec *new_buf = (Vec *)realloc(base_dirs, (size_t)new_cap * sizeof(Vec));
-        if (!new_buf) exit(1);
+        if (!new_buf) {
+            fprintf(stderr, "memory allocation failed\n");
+            exit(1);
+        }
         base_dirs = new_buf;
         base_dir_cap = new_cap;
     }
@@ -180,7 +193,7 @@ static void build_base_dirs(void) {
 static double find_exit_along_dir(double ux, double uy, double dx, double dy) {
     if (!polygons_overlap_strict(dx, dy)) return 0.0;
 
-    double hi = 1e-6;
+    double hi = INITIAL_STEP_SIZE;
     while (hi < search_limit && polygons_overlap_strict(dx + ux * hi, dy + uy * hi)) {
         hi *= 2.0;
     }
@@ -191,8 +204,8 @@ static double find_exit_along_dir(double ux, double uy, double dx, double dy) {
     double lo = 0.0;
     double prev = 0.0;
     int found = 0;
-    for (int s = 1; s <= 24; ++s) {
-        double t = hi * (double)s / 24.0;
+    for (int s = 1; s <= COARSE_SEARCH_STEPS; ++s) {
+        double t = hi * (double)s / (double)COARSE_SEARCH_STEPS;
         if (!polygons_overlap_strict(dx + ux * t, dy + uy * t)) {
             lo = prev;
             hi = t;
@@ -205,7 +218,7 @@ static double find_exit_along_dir(double ux, double uy, double dx, double dy) {
         lo = prev;
     }
 
-    for (int it = 0; it < 45; ++it) {
+    for (int it = 0; it < BINARY_SEARCH_ITERATIONS; ++it) {
         double mid = 0.5 * (lo + hi);
         if (polygons_overlap_strict(dx + ux * mid, dy + uy * mid)) {
             lo = mid;
@@ -243,8 +256,8 @@ static Vec solve_one(double dx, double dy) {
         return ans;
     }
 
-    double delta = PI / 6.0;
-    for (int round = 0; round < 8; ++round) {
+    double delta = ANGULAR_REFINEMENT_INITIAL_DELTA;
+    for (int round = 0; round < ANGULAR_REFINEMENT_ROUNDS; ++round) {
         int improved = 0;
         for (int k = -2; k <= 2; ++k) {
             double ang = best_ang + delta * (double)k;
@@ -303,8 +316,8 @@ int main(void) {
     }
 
     double diag = sqrt(sqr(maxx - minx) + sqr(maxy - miny));
-    search_limit = diag * 8.0 + 10.0;
-    if (search_limit < 10.0) search_limit = 10.0;
+    search_limit = diag * SEARCH_LIMIT_MULTIPLIER + SEARCH_LIMIT_BASE;
+    if (search_limit < SEARCH_LIMIT_BASE) search_limit = SEARCH_LIMIT_BASE;
 
     build_base_dirs();
 
@@ -344,8 +357,8 @@ int main(void) {
         }
 
         Vec v = solve_one(dx, dy);
-        if (fabs(v.x) < 5e-7) v.x = 0.0;
-        if (fabs(v.y) < 5e-7) v.y = 0.0;
+        if (fabs(v.x) < OUTPUT_ZERO_THRESHOLD) v.x = 0.0;
+        if (fabs(v.y) < OUTPUT_ZERO_THRESHOLD) v.y = 0.0;
         printf("%.5f %.5f\n", v.x, v.y);
         fflush(stdout);
     }
